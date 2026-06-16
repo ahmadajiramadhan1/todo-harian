@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ToDo Harian Ku (Protected Cloud Sync)</title>
+  <title>ToDo Harian Ku (Protected Cloud Sync + 2FA QR)</title>
+  <!-- Library Keamanan OTPAuth Resmi untuk Google Authenticator -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/otpauth/9.4.1/otpauth.umd.min.js"></script>
+  <!-- Library Pembuat QR Code Ringan & Gratis -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root { --primary: #4f46e5; }
     body {
@@ -13,19 +17,31 @@
       min-height: 100vh;
       color: #333;
     }
-    /* Tampilan Layar Kunci Password */
+    /* Tampilan Layar Kunci Password & 2FA */
     #lock-screen {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: linear-gradient(135deg, #4f46e5, #8b5cf6);
       display: flex; justify-content: center; align-items: center; z-index: 9999;
     }
     .lock-box {
-      background: white; padding: 40px; border-radius: 20px;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.3); text-align: center; max-width: 360px; width: 100%;
+      background: white; padding: 35px; border-radius: 20px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3); text-align: center; max-width: 380px; width: 100%;
     }
     .lock-box h2 { margin-top: 0; color: #333; }
-    .lock-box input { width: 80%; margin-bottom: 15px; text-align: center; font-size: 18px; letter-spacing: 3px; }
+    .lock-box input { width: 85%; margin-bottom: 15px; text-align: center; font-size: 18px; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; }
     
+    .secret-box { background: #f1f5f9; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 14px; word-break: break-all; margin: 10px 0; border: 1px dashed #cbd5e1; text-align: center; }
+    .btn-forgot { background: none; border: none; color: #6366f1; cursor: pointer; font-size: 13px; text-decoration: underline; margin-top: 10px; }
+    
+    /* Wadah QR Code */
+    #qrcode-container {
+      display: flex; justify-content: center; margin: 15px 0;
+    }
+    #qrcode img {
+      border: 6px solid white;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
     /* Tampilan Utama Aplikasi */
     .container {
       max-width: 820px; margin: 30px auto;
@@ -76,16 +92,51 @@
 </head>
 <body>
 
+  <!-- LAYER KUNCI PASSWORD / 2FA -->
   <div id="lock-screen">
-    <div class="lock-box">
+    <div class="lock-box" id="auth-panel">
       <h2 id="lock-title">🔐 Masukkan Password</h2>
       <p id="lock-desc" style="color: #64748b; font-size: 14px; margin-bottom: 20px;">Aplikasi ini dilindungi kunci keamanan</p>
-      <input type="password" id="password-input" placeholder="••••">
-      <br>
-      <button onclick="checkPassword()" style="width: 80%;">Buka Aplikasi</button>
+      
+      <!-- Bagian Input Password Standar -->
+      <div id="password-section">
+        <input type="password" id="password-input" placeholder="••••">
+        <br>
+        <button onclick="checkPassword()" style="width: 85%;">Buka Aplikasi</button>
+        <br>
+        <button class="btn-forgot" onclick="show2faResetPanel()">Lupa Password? Reset via 2FA Google</button>
+      </div>
+
+      <!-- Bagian Setup Pertama Kali Google Authenticator (DENGAN QR CODE) -->
+      <div id="setup-2fa-section" style="display: none; text-align: left;">
+        <p style="font-size: 14px; font-weight: bold; margin-bottom: 5px;">Langkah 1: Scan QR Code di Google Authenticator</p>
+        
+        <!-- Wadah Render Otomatis Gambar QR Code -->
+        <div id="qrcode-container">
+          <div id="qrcode"></div>
+        </div>
+
+        <p style="font-size: 12px; color: #64748b; text-align: center; margin-top: 0; margin-bottom: 10px;">Atau masukkan kunci manual berikut jika kamera error:</p>
+        <div class="secret-box" id="secret-key-display">KUNCI_RAHASIA</div>
+        
+        <p style="font-size: 14px; font-weight: bold; margin-bottom: 5px; margin-top: 15px;">Langkah 2: Konfirmasi Kode OTP</p>
+        <input type="text" id="setup-otp-input" placeholder="Contoh: 123456" maxlength="6" style="letter-spacing: 5px; width: 93%;">
+        <button onclick="confirmSetup2fa()" style="width: 100%; background: #22c55e;">Simpan & Aktifkan Keamanan</button>
+      </div>
+
+      <!-- Bagian Layar Reset Darurat OTP -->
+      <div id="reset-2fa-section" style="display: none;">
+        <p style="font-size: 14px; color: #475569; margin-bottom: 15px;">Buka Google Authenticator milikmu, lalu masukkan 6 digit angka konfirmasi untuk mereset password harian.</p>
+        <input type="text" id="reset-otp-input" placeholder="000000" maxlength="6" style="letter-spacing: 5px;">
+        <br>
+        <button onclick="verify2faReset()" style="width: 85%; background: #ef4444;">Verifikasi & Reset Password</button>
+        <br>
+        <button class="btn-forgot" onclick="backToLogin()">Kembali ke Login</button>
+      </div>
     </div>
   </div>
 
+  <!-- KONTEN UTAMA APLIKASI -->
   <div class="container">
     <header>
       <button class="btn-lock-out" onclick="lockApp()">🔒 Kunci</button>
@@ -115,7 +166,7 @@
     <div class="input-area">
       <input type="text" id="task-input" placeholder="Tambah tugas baru..." style="flex:1;">
       <label><input type="checkbox" id="recurring"> Ulang tiap hari</label>
-      <button id="btn-add" onclick="addTask()">Tambah</button>
+      <button onclick="addTask()">Tambah</button>
     </div>
 
     <div class="section-title">Tugas Hari Ini</div>
@@ -134,9 +185,11 @@
   <script>
     let currentDateKey = new Date().toISOString().split('T')[0];
     const recurringKey = 'recurringTasks';
+    let tempPasswordHash = ''; 
+    
     const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbxVmeGMsPSkHHxyGOh3YSKngZFTbp0JHF7uPlCa80ttb2fcnYxlelnTDkrhawVGT68KbA/exec";
 
-    // --- SISTEM KEAMANAN PASSWORD (HASH SEDERHANA) ---
+    // --- SISTEM MATEMATIKA HASHING (PASSWORD) ---
     function hashString(str) {
       let hash = 0;
       for (let i = 0; i < str.length; i++) {
@@ -146,14 +199,86 @@
       return hash.toString();
     }
 
+    // --- INISIALISASI KEAMANAN (STARTUP) ---
     function initSecurity() {
       const savedHash = localStorage.getItem('app_pwd_hash');
-      if (!savedHash) {
+      const saved2faSecret = localStorage.getItem('app_2fa_secret');
+
+      if (!savedHash || !saved2faSecret) {
         document.getElementById('lock-title').textContent = "🆕 Buat Password Baru";
-        document.getElementById('lock-desc').textContent = "Karena ini pertama kali, silakan tentukan password rahasiamu.";
+        document.getElementById('lock-desc').textContent = "Langkah 1 dari 2: Tentukan password rahasia pertamamu.";
+        document.getElementById('password-section').innerHTML = `
+          <input type="password" id="password-setup-input" placeholder="Ketik password baru">
+          <br>
+          <button onclick="setupStepOne()" style="width: 85%;">Lanjut ke Setup 2FA Google</button>
+        `;
       }
     }
 
+    // Pembuatan Password Langkah 1 + GENERATE QR CODE
+    function setupStepOne() {
+      const txt = document.getElementById('password-setup-input').value;
+      if (!txt || !txt.trim()) return alert("Password tidak boleh kosong!");
+      
+      tempPasswordHash = hashString(txt.trim());
+      
+      // Buat Kunci Rahasia Base32 Acak untuk Google Authenticator
+      const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      let randomSecret = '';
+      for (let i = 0; i < 16; i++) {
+        randomSecret += characters.charAt(Math.floor(Math.random() * characters.length));
+      }
+
+      // Format URL Standar yang dikenali oleh Google Authenticator untuk menghasilkan QR Code
+      // otpauth://totp/[Nama_Aplikasi]:[Nama_User]?secret=[Kunci_Rahasia]&issuer=[Nama_Aplikasi]
+      const labelApp = "ToDoHarianKu";
+      const userIdent = "UserPribadi";
+      const otpauthUrl = `otpauth://totp/${labelApp}:${userIdent}?secret=${randomSecret}&issuer=${labelApp}&digits=6&period=30`;
+
+      // Bersihkan container QR lama jika ada
+      document.getElementById('qrcode').innerHTML = "";
+
+      // Render gambar QR Code otomatis ke elemen HTML
+      new QRCode(document.getElementById("qrcode"), {
+        text: otpauthUrl,
+        width: 160,
+        height: 160,
+        colorDark : "#000000",
+        colorLight : "#ffffff",
+        correctLevel : QRCode.CorrectLevel.M
+      });
+
+      // Tampilkan panel langkah ke-2 (2FA)
+      document.getElementById('lock-title').textContent = "🛡️ Aktivasi 2FA Google";
+      document.getElementById('lock-desc').textContent = "Buka aplikasi Google Authenticator di HP, lalu scan QR Code di bawah ini.";
+      document.getElementById('password-section').style.display = 'none';
+      document.getElementById('setup-2fa-section').style.display = 'block';
+      document.getElementById('secret-key-display').textContent = randomSecret;
+    }
+
+    // Konfirmasi dan Verifikasi Kunci OTP Langkah 2
+    function confirmSetup2fa() {
+      const secret = document.getElementById('secret-key-display').textContent;
+      const otpInput = document.getElementById('setup-otp-input').value.trim();
+
+      if (otpInput.length !== 6) return alert("Masukkan 6 digit angka dari aplikasi!");
+
+      let totp = new OTPAuth.TOTP({ secret: secret, digits: 6, period: 30 });
+      let isValid = totp.validate({ token: otpInput, window: 1 });
+
+      if (isValid !== null) {
+        localStorage.setItem('app_pwd_hash', tempPasswordHash);
+        localStorage.setItem('app_2fa_secret', secret);
+        
+        alert("🎉 Pengaman Berlapis Aktif! QR Code sukses dipasangkan ke HP kamu.");
+        sessionStorage.setItem('is_logged_in', 'true');
+        location.reload();
+      } else {
+        alert("❌ Kode OTP salah atau kedaluwarsa! Coba cek angka terbaru di Google Authenticator.");
+      }
+    }
+
+    // --- PROSES LOGIN STANDAR ---
     function checkPassword() {
       const input = document.getElementById('password-input').value;
       if (!input) return alert("Password tidak boleh kosong!");
@@ -161,28 +286,53 @@
       const inputHash = hashString(input);
       const savedHash = localStorage.getItem('app_pwd_hash');
 
-      if (!savedHash) {
-        // Pembuatan password pertama kali
-        localStorage.setItem('app_pwd_hash', inputHash);
-        alert("Password berhasil dibuat! Jaga kerahasiaannya.");
-        document.getElementById('lock-screen').style.display = 'none';
-        sessionStorage.setItem('is_logged_in', 'true');
-      } else if (inputHash === savedHash) {
-        // Password Benar
+      if (inputHash === savedHash) {
         document.getElementById('lock-screen').style.display = 'none';
         sessionStorage.setItem('is_logged_in', 'true');
         document.getElementById('password-input').value = '';
       } else {
-        alert("❌ Password salah! Akses ditolak.");
+        alert("❌ Password salah!");
         document.getElementById('password-input').value = '';
+      }
+    }
+
+    // --- ALUR FITUR LUPA PASSWORD (RESET VIA 2FA) ---
+    function show2faResetPanel() {
+      document.getElementById('lock-title').textContent = "🔑 Darurat: Reset via 2FA";
+      document.getElementById('lock-desc').textContent = "Konfirmasi Pemilik Akun";
+      document.getElementById('password-section').style.display = 'none';
+      document.getElementById('reset-2fa-section').style.display = 'block';
+    }
+
+    function backToLogin() {
+      document.getElementById('lock-title').textContent = "🔐 Masukkan Password";
+      document.getElementById('lock-desc').textContent = "Aplikasi ini dilindungi kunci keamanan";
+      document.getElementById('password-section').style.display = 'block';
+      document.getElementById('reset-2fa-section').style.display = 'none';
+    }
+
+    function verify2faReset() {
+      const otpInput = document.getElementById('reset-otp-input').value.trim();
+      const savedSecret = localStorage.getItem('app_2fa_secret');
+
+      if (!savedSecret) return alert("Error: Kunci 2FA dasar tidak ditemukan di perangkat ini!");
+      if (otpInput.length !== 6) return alert("Masukkan 6 digit angka OTP!");
+
+      let totp = new OTPAuth.TOTP({ secret: savedSecret, digits: 6, period: 30 });
+      let isValid = totp.validate({ token: otpInput, window: 1 });
+
+      if (isValid !== null) {
+        localStorage.removeItem('app_pwd_hash');
+        alert("✅ Verifikasi Berhasil! Password lamamu telah dihapus. Silakan buat password baru sekarang.");
+        location.reload();
+      } else {
+        alert("❌ Kode OTP salah! Silakan samakan kembali dengan angka di aplikasi Google Authenticator kamu.");
       }
     }
 
     function lockApp() {
       sessionStorage.removeItem('is_logged_in');
-      document.getElementById('lock-screen').style.display = 'flex';
-      document.getElementById('lock-title').textContent = "🔐 Masukkan Password";
-      document.getElementById('lock-desc').textContent = "Aplikasi terkunci kembali.";
+      location.reload();
     }
 
     function resetPasswordManual() {
@@ -191,10 +341,10 @@
       if (hashString(oldPwd) !== localStorage.getItem('app_pwd_hash')) return alert("Password lama salah!");
       
       const newPwd = prompt("Masukkan password barumu:");
-      if (!newPwd || !newPwd.trim()) return alert("Password baru tidak valid!");
+      if (!newPwd || !newPwd.trim()) return alert("Password tidak valid!");
       
       localStorage.setItem('app_pwd_hash', hashString(newPwd.trim()));
-      alert("Password sukses diganti! Silakan kunci kembali jika sudah selesai.");
+      alert("Password sukses diganti!");
     }
 
     // --- MANAJEMEN CLOUD GOOGLE SHEETS ---
@@ -216,43 +366,40 @@
           body: JSON.stringify(allData)
         });
         document.getElementById('sync-status').textContent = "✅ Berhasil Diunggah";
-        alert("Data lokal berhasil dikirim dan diamankan di Google Sheets!");
+        alert("Data lokal sukses diamankan ke Google Sheets!");
       } catch (e) {
         document.getElementById('sync-status').textContent = "❌ Gagal Mengunggah";
-        alert("Gagal terhubung ke Cloud.");
       }
     }
 
     async function manualFetchFromCloud() {
       if (!CLOUD_API_URL) return alert("URL Cloud tidak terkonfigurasi!");
-      if (!confirm("Peringatan: Data di perangkat ini akan diganti dengan data terakhir dari Google Sheets. Lanjutkan?")) return;
+      if (!confirm("Peringatan: Data di perangkat ini akan diganti dengan data dari Google Sheets. Lanjutkan?")) return;
       
       document.getElementById('sync-status').textContent = "🔄 Mengambil dari Cloud...";
       try {
         const res = await fetch(CLOUD_API_URL);
         const cloudData = await res.json();
         
-        // Simpan hash password lama agar tidak hilang terhapus data cloud
         const currentHash = localStorage.getItem('app_pwd_hash');
+        const currentSecret = localStorage.getItem('app_2fa_secret');
         
         localStorage.clear();
         Object.keys(cloudData).forEach(key => {
           localStorage.setItem(key, cloudData[key]);
         });
         
-        // Kembalikan hash password lokal setelah clear data cloud
         localStorage.setItem('app_pwd_hash', currentHash);
-        
+        localStorage.setItem('app_2fa_secret', currentSecret);
         document.getElementById('sync-status').textContent = "✅ Data Cloud Terpasang";
         loadTasks();
-        alert("Data dari Google Sheets berhasil ditarik!");
+        alert("Data cloud berhasil disinkronkan ke perangkat!");
       } catch (e) {
         document.getElementById('sync-status').textContent = "❌ Gagal Menarik Data";
-        alert("Gagal mengambil data dari Cloud.");
       }
     }
 
-    // --- LOGIKA TASKS (TIDAK BERUBAH) ---
+    // --- MANAJEMEN TUGAS ---
     function loadRecurringTasks() { return JSON.parse(localStorage.getItem(recurringKey)) || []; }
     function saveRecurringTasks(rec) { localStorage.setItem(recurringKey, JSON.stringify(rec)); }
 
@@ -407,7 +554,7 @@
       if (!confirm("Hapus tugas ini?")) return;
       let tasks = JSON.parse(localStorage.getItem('tasks_' + currentDateKey)) || [];
       const task = tasks[i];
-      if (task.recurring && confirm("Hapus juga dari sistem pengulangan (Recurring)?")) {
+      if (task.recurring && confirm("Hapus juga dari recurring?")) {
         let rec = loadRecurringTasks().filter(r => r.text !== task.text);
         saveRecurringTasks(rec);
       }
@@ -423,7 +570,6 @@
 
     window.onload = () => {
       initSecurity();
-      // Cek status login sesi ini
       if (sessionStorage.getItem('is_logged_in') === 'true') {
         document.getElementById('lock-screen').style.display = 'none';
       }
@@ -432,7 +578,6 @@
       loadTasks();
     };
 
-    // Shortcut tombol enter pada password & task input
     document.getElementById('password-input').addEventListener('keypress', e => { if (e.key === 'Enter') checkPassword(); });
     document.getElementById('task-input').addEventListener('keypress', e => { if (e.key === 'Enter') addTask(); });
   </script>
